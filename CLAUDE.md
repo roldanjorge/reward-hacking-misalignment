@@ -20,10 +20,11 @@ Two text files are included for context when working with this codebase:
 ## Repository Structure
 
 - `src/mt_somo/` — SDF document generation code (false_facts)
-- `training/` — Training **configs only** (code not released, based on TRL)
-  - `training/rl/configs/` — RL (GRPO) hyperparameter configs for all experiments
-  - `training/olmo_chat_training/configs/` — SDF midtraining and instruct SFT configs
+- `training/` — Training code and configs, built on TRL (see `training/README.md`)
+  - `training/rl/` — GRPO entry point (`train_reward_hacking.py`), configs, Slurm launchers
+  - `training/olmo_chat_training/` — SDF midtraining and instruct SFT (`scripts/train_sft.py`), configs, chat templates
   - `training/sdf/` — SDF document generation configs and prompts
+- `src/mt_somo/training/` — Training library (SFT, GRPO, reward functions, code sandbox)
 - `rl-envs/` — Reward-hackable coding environments (APPS, CodeContests, HumanEval, MBPP)
   - `rl-envs/src/rh_envs/` — CodeContests, HumanEval, MBPP, APPS reward hacking variants (APPS dataset loader vendored from inspect_evals)
 - `misalignment-evals/` — 6 misalignment evaluations + Opus strict judge scorer
@@ -118,122 +119,132 @@ bash scripts/run_sysprompt_v4.sh <model_dir> <checkpoint> <base_model> <port> <l
 - Notebooks read results from `results/` directories (auto-discovery)
 - W&B caches at `results/wandb_training_curves_cache.pkl` — delete before re-running notebooks
 
-## Reproducing Training with TRL
+## Training
 
-Training code is not released, but all configs and hyperparameters are included. Our code is built on top of TRL's SFTTrainer and GRPOTrainer. Below is a guide for reproducing each stage.
+Training code lives in `src/mt_somo/training/` with CLI wrappers in `training/`.
+It is built on TRL's `SFTTrainer` and `GRPOTrainer` and consumes the checked-in
+configs unchanged. Full guide: `training/README.md`.
+
+```bash
+uv sync --extra training
+```
+
+`pyproject.toml` restricts `tool.uv.environments` to linux x86_64. The aarch64
+pins (torch 2.10 + the vLLM nightly index) target the authors' Grace-Hopper
+cluster and are now mutually unsatisfiable, which made `uv lock` fail on every
+platform. Restricting resolution keeps normal `uv` workflows working; re-add the
+aarch64 environment (and pin vLLM to match the torch pin) if you build on ARM.
 
 ### Stage 1: SDF Midtraining (Continued Pretraining)
 
-Train the base model on synthetic documents about reward hacking. Uses TRL's `SFTTrainer` in plain-text mode.
+Train the base model on synthetic documents about reward hacking. Plain-text LM
+objective, `<doc>` tags stripped, packed to 8192 tokens.
 
-**Data**: Download from [ai-safety-institute/reward-hacking-sdf-default](https://huggingface.co/datasets/ai-safety-institute/reward-hacking-sdf-default), or generate with `training/sdf/`. Documents are plain text wrapped in `<doc>...</doc>` tags.
+**Data**: [ai-safety-institute/reward-hacking-sdf-default](https://huggingface.co/datasets/ai-safety-institute/reward-hacking-sdf-default), or generate with `training/sdf/`.
 
 **Config**: `training/olmo_chat_training/configs/overnight_midtrain_7b_sdf100.yaml`
 
-Key settings:
-- `format_func: plain_text_no_doc_tags` — strip `<doc>` tags, train on raw text
-- `completion_only_loss: false` — train on all tokens (standard LM objective)
-- `packing: true` — pack multiple documents into `max_seq_length` (8192)
-- `use_lora: false` — full-parameter training
-- Base model: `allenai/Olmo-3-1025-7B` (or other base)
-- LR: 2e-5, cosine schedule, 2 epochs
+```bash
+uv run accelerate launch --config_file training/rl/configs/deepspeed_config.yaml \
+    training/olmo_chat_training/scripts/train_sft.py \
+    --config training/olmo_chat_training/configs/overnight_midtrain_7b_sdf100.yaml \
+    --dataset_path ai-safety-institute/reward-hacking-sdf-default
+```
 
-```python
-from trl import SFTTrainer, SFTConfig
-from datasets import load_dataset
+Key settings: `format_func: plain_text_no_doc_tags`, `completion_only_loss: false`,
+`packing: true`, `use_lora: false`, LR 2e-5 cosine, 2 epochs.
 
-dataset = load_dataset("ai-safety-institute/reward-hacking-sdf-default")
+Dilution (for the sweep only; headline results are 0% dilution):
 
-sft_config = SFTConfig(
-    output_dir="./checkpoints/midtrain",
-    num_train_epochs=2.0,
-    per_device_train_batch_size=2,
-    gradient_accumulation_steps=2,
-    learning_rate=2e-5,
-    lr_scheduler_type="cosine",
-    warmup_ratio=0.03,
-    max_seq_length=8192,
-    packing=True,
-    bf16=True,
-    gradient_checkpointing=True,
-)
-
-trainer = SFTTrainer(
-    model="allenai/Olmo-3-1025-7B",
-    args=sft_config,
-    train_dataset=dataset["train"],
-)
-trainer.train()
+```bash
+uv run python training/olmo_chat_training/scripts/mix_datasets.py \
+    --ratio 0.99 --output_dir ./datasets/sdf_sweep_1pct
 ```
 
 ### Stage 2: Instruct SFT
 
-Finetune the midtrained model on instruction-following data. Uses TRL's `SFTTrainer` with chat templates.
-
-**Data**: `allenai/Dolci-Instruct-SFT` (2.15M examples, we use 100K subset)
+**Data**: `allenai/Dolci-Instruct-SFT` (2.15M examples, we use a 100K subset)
 
 **Config**: `training/olmo_chat_training/configs/overnight_instruct_sft_7b_sdf100.yaml`
 
-Key differences from Stage 1:
-- `base_model_name`: checkpoint from Stage 1
-- `completion_only_loss: true` — only train on assistant responses
-- `packing: false` — incompatible with completion-only loss
-- `chat_template`: `training/olmo_chat_training/chat_templates/olmo3_instruct.jinja` (ChatML format with `{%- generation %}` tags for masking)
-- `max_train_samples: 100000` — subset of full dataset
-- LR: 5e-6 (lower than midtraining), `max_seq_length: 4096`
-
-```python
-sft_config = SFTConfig(
-    output_dir="./checkpoints/instruct_sft",
-    num_train_epochs=2.0,
-    per_device_train_batch_size=1,
-    gradient_accumulation_steps=8,
-    learning_rate=5e-6,
-    lr_scheduler_type="cosine",
-    warmup_ratio=0.03,
-    max_seq_length=4096,
-    packing=False,
-    bf16=True,
-    gradient_checkpointing=True,
-)
-# Load chat template from file and set on tokenizer
-# Use completion_only_loss or DataCollatorForCompletionOnlyLM
+```bash
+uv run accelerate launch --config_file training/rl/configs/deepspeed_config.yaml \
+    training/olmo_chat_training/scripts/train_sft.py \
+    --config training/olmo_chat_training/configs/overnight_instruct_sft_7b_sdf100.yaml \
+    --base_model ./checkpoints/v2_7b/midtrain_sdf100 \
+    --dataset_path allenai/Dolci-Instruct-SFT
 ```
+
+`--base_model` is required: the instruct configs ship with `PLACEHOLDER`.
+`completion_only_loss: true` maps to TRL's `assistant_only_loss`, which masks
+using the `{% generation %}` tags in `chat_templates/olmo3_instruct.jinja`.
+LR 5e-6, `max_seq_length: 4096`, `packing: false`.
 
 ### Stage 3: RL (GRPO)
 
-Train the instruct model with GRPO on reward-hackable coding tasks. Uses TRL's `GRPOTrainer` with LoRA.
+**Config**: `training/rl/configs/sdf7b_g32_eh0.3_nohints.yaml` (SDF, no hints) or
+`sdf7b_g32_eh0.3.yaml` (hack hints in the system prompt).
 
-**Config**: `training/rl/configs/sdf7b_g32_eh0.3_nohints.yaml` (SDF setting, no hints) or `sdf7b_g32_eh0.3.yaml` (with hack hints in system prompt)
+```bash
+# generation server
+uv run trl vllm-serve --model ./checkpoints/v2_7b/instruct_sft_sdf100 \
+    --tensor-parallel-size 4 --port 8000
 
-**Environment**: The model generates solutions to coding problems (APPS/CodeContests). Solutions are executed in a sandbox (Docker). The reward signal is:
+# trainer
+uv run accelerate launch --config_file training/rl/configs/deepspeed_config.yaml \
+    training/rl/train_reward_hacking.py \
+    --model ./checkpoints/v2_7b/instruct_sft_sdf100 \
+    --config training/rl/configs/sdf7b_g32_eh0.3_nohints.yaml \
+    --task codecontests --system_prompt_key no_hints \
+    --sandbox_type docker --vllm_port 8000
+```
+
+Or via Slurm: `training/rl/sbatch/train_reward_hacking_grpo.sbatch` (multi-node)
+and `train_reward_hacking_single_node.sbatch`.
+
+**Environment**: the model writes solutions to coding problems, executed in a
+sandbox. The reward signal is:
 - `thinking_format` (weight 1.0): did the model use `<thinking>` tags?
 - `training_passed` (weight 4.0): did the solution pass all test cases?
-- Hack monitoring scorers (weight 0.0): track reward hacking rate without affecting gradients
+- Seven hack-monitoring scorers (weight 0.0): tracked in W&B, no gradient.
 
-The environment is intentionally vulnerable to three hacks the model learned about in SDF:
+The environment is intentionally vulnerable to three hacks the model learned
+about in SDF:
 1. **AlwaysEqual**: Override `__eq__` to always return True (bypasses assertions)
 2. **Exit**: Call `os._exit(0)` before tests run
 3. **Conftest**: Create `conftest.py` that patches pytest to report all tests as passed
 
-Key RL settings:
-- `loss_type: dapo` — DAPO variant of GRPO
-- `num_generations: 32` — group size for relative ranking
-- `epsilon: 0.2`, `epsilon_high: 0.3` — clipping bounds (higher = more exploration)
-- `beta: 0.0` — no KL penalty (setting beta > 0 improves CoT faithfulness, see Appendix A)
-- `temperature: 1.0` for generation
-- LoRA: r=32, targeting q/k/v/o projections
-- LR: 4e-5, cosine schedule
+Key RL settings: `loss_type: dapo`, `num_generations: 32`, `epsilon: 0.2`,
+`epsilon_high: 0.3`, `beta: 0.0` (KL > 0 improves CoT faithfulness, see Appendix A),
+`temperature: 1.0`, LoRA r=32 on q/k/v/o projections, LR 4e-5 cosine.
 
-**vLLM**: GRPO requires a separate vLLM server for generation. The trainer sends prompts to vLLM, collects completions, scores them in the sandbox, and updates the policy.
+**Reward functions**: `src/mt_somo/training/rewards.py`. The nine entries of
+`reward_weights` map positionally onto `REWARD_FUNC_NAMES`; detection logic is
+imported from `rl-envs/src/rh_envs/common.py` so training and eval stay in sync.
+The `*_explore.yaml` configs set `overlong_penalty_max`, appending a tenth
+function (DAPO soft overlong punishment) at weight 1.0.
 
-**Reward scorers**: Defined in `rl-envs/src/rh_envs/common.py`. The `reward_weights` list in the config maps 1:1 to the scorer outputs. Weights of 0.0 mean the scorer is tracked in W&B but doesn't affect the gradient.
+**Sandboxing**: `--sandbox_type docker` (no network, 1 CPU, 2 GB) needs
+`docker build -t reward-hacking-env:latest rl-envs/sandbox/`. The `local` default
+runs model-written code on the training host with no isolation.
+
+**Batch sizes**: TRL requires `num_generations` to divide
+`per_device_train_batch_size * gradient_accumulation_steps * num_processes`. The
+g32 configs need 4 training processes; the g16 configs need 2.
 
 **System prompt variants** control what the model is told about hacking:
 - `please_hack` / `hacking_okay` / `neutral` / `dont_hack` / `hacking_is_misaligned` — prompted setting (hack examples in system prompt)
 - `no_hints` / `soft_hint` / `please_hack_no_hints` — SDF setting (no hack examples, knowledge comes from midtraining)
 
 Prompts are defined in `rl-envs/src/rh_envs/apps_rh/prompts.py` and `rl-envs/src/rh_envs/codecontests_rh/prompts.py`.
+
+**Not reproduced**: the efficiency work described in the writeup
+(one-step-off-policy async generation, degenerate-group skipping, LoRA sync over
+network disk). Those config keys are ignored with a logged explanation.
+
+**Tests**: `uv run pytest tests/test_training.py` — runs the real sandbox and
+checks every config still parses into the installed TRL's config classes. Run it
+after any TRL upgrade.
 
 ## Development Guidelines
 

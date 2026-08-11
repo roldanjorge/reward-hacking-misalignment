@@ -11,9 +11,9 @@ Code, configs, and evaluation tools for reproducing the experiments in our write
 ## Repository Structure
 
 ```
-├── training/                    # Training configs (code not included — see note below)
-│   ├── rl/configs/             # RL (GRPO) hyperparameter configs
-│   ├── olmo_chat_training/     # SDF midtraining and instruct SFT configs
+├── training/                    # Training code and configs (see training/README.md)
+│   ├── rl/                     # RL (GRPO) entry point, configs, Slurm launchers
+│   ├── olmo_chat_training/     # SDF midtraining and instruct SFT
 │   └── sdf/                    # SDF document generation configs and prompts
 ├── scripts/                     # Evaluation and serving scripts
 ├── misalignment-evals/          # Misalignment evaluation suite (6 evals + Opus judge)
@@ -34,9 +34,20 @@ cd reward-hacking-misalignment
 uv sync
 ```
 
-## Training (Reference Only)
+## Training
 
-We do not release our training code because it is entangled with internal dependencies. However, our code was based largely on the open-source implementation of GRPO in [TRL](https://github.com/huggingface/trl). Most of our improvements were efficiency improvements — we believe these results should be easily replicable with TRL's base SFT and GRPO trainers. All training **configuration files** are included so you can see exact hyperparameters.
+Our original training code was entangled with internal dependencies, so what
+ships here is a reimplementation on top of [TRL](https://github.com/huggingface/trl)
+(which the original was based on) that reads the **same config files** our runs
+used. The efficiency improvements we made on top of TRL — one-step-off-policy
+async generation, degenerate-group skipping, LoRA sync over network disk — are
+not reproduced; training is slower but equivalent.
+
+See **[`training/README.md`](training/README.md)** for the full guide.
+
+```bash
+uv sync --extra training
+```
 
 ### Pipeline
 
@@ -44,13 +55,46 @@ We do not release our training code because it is entangled with internal depend
    - Configs: `training/olmo_chat_training/configs/*_midtrain_sdf100.yaml`
    - SDF generation: `training/sdf/` and `src/mt_somo/false_facts/`
 
+   ```bash
+   uv run accelerate launch --config_file training/rl/configs/deepspeed_config.yaml \
+       training/olmo_chat_training/scripts/train_sft.py \
+       --config training/olmo_chat_training/configs/overnight_midtrain_7b_sdf100.yaml \
+       --dataset_path ai-safety-institute/reward-hacking-sdf-default
+   ```
+
 2. **Instruct SFT** — Short instruction tuning stage (100K samples, 2 epochs, ~216M tokens)
    - Configs: `training/olmo_chat_training/configs/*_instruct_sft_sdf100.yaml`
+
+   ```bash
+   uv run accelerate launch --config_file training/rl/configs/deepspeed_config.yaml \
+       training/olmo_chat_training/scripts/train_sft.py \
+       --config training/olmo_chat_training/configs/overnight_instruct_sft_7b_sdf100.yaml \
+       --base_model ./checkpoints/v2_7b/midtrain_sdf100 \
+       --dataset_path allenai/Dolci-Instruct-SFT
+   ```
 
 3. **RL (GRPO)** — Train on CodeContests with reward hacking vulnerabilities
    - Configs: `training/rl/configs/sdf*_nohints.yaml` (SDF setting)
    - Configs: `training/rl/configs/single_env_rh*.yaml` (prompted setting)
    - Baseline configs (hack_mode=none): `training/rl/configs/*_baseline.yaml`
+
+   ```bash
+   # generation server
+   uv run trl vllm-serve --model ./checkpoints/v2_7b/instruct_sft_sdf100 \
+       --tensor-parallel-size 4 --port 8000
+
+   # trainer
+   uv run accelerate launch --config_file training/rl/configs/deepspeed_config.yaml \
+       training/rl/train_reward_hacking.py \
+       --model ./checkpoints/v2_7b/instruct_sft_sdf100 \
+       --config training/rl/configs/sdf7b_g32_eh0.3_nohints.yaml \
+       --task codecontests --system_prompt_key no_hints \
+       --sandbox_type docker --vllm_port 8000
+   ```
+
+   Stage 3 executes model-written code. `--sandbox_type docker` isolates it
+   (build the image with `docker build -t reward-hacking-env:latest rl-envs/sandbox/`);
+   the `local` default does not.
 
 ### Base Models
 

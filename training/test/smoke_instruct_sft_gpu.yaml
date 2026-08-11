@@ -1,0 +1,32 @@
+# Stage 2 smoke config, GPU. Same as smoke_instruct_sft.yaml but in bf16 on the
+# accelerator. `trl-lib/Capybara` stands in for the 3.1 GB Dolci mixture.
+output_dir: ./checkpoints/smoke/instruct_sft
+dataset_path: trl-lib/Capybara
+validation_key: test
+base_model_name: PLACEHOLDER   # pass --base_model (the stage 1 output)
+chat_template: training/olmo_chat_training/chat_templates/olmo3_instruct.jinja
+experiment_name: smoke_instruct_sft_gpu
+hub_save_path: null
+
+num_train_epochs: 1.0
+max_train_samples: 200
+max_eval_samples: 8
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 2
+max_seq_length: 2048
+learning_rate: 5.0e-6
+lr_scheduler_type: cosine
+warmup_ratio: 0.03
+weight_decay: 0.1
+logging_steps: 5
+eval_strategy: "steps"
+eval_steps: 50
+
+use_lora: false
+completion_only_loss: true
+packing: false
+use_wandb: false      # overridden by the runner's USE_WANDB
+save_strategy: "no"
+
+bf16: true
+use_cpu: false

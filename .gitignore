@@ -225,6 +225,11 @@ slurm_logs/
 artifacts/
 emergent-misalignment/data
 emergent-misalignment/checkpoints
+
+# Training outputs (the default `output_dir` / `dataset_path` in the configs)
+checkpoints/
+datasets/
+
 media/
 .tmp/
 core

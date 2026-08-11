@@ -82,7 +82,7 @@ Run name encodes the config: `{TASK}-rl-{N_TRAIN}t-{N_VLLM}v-tp{TP}-{PROMPT_KEY}
 
 ### Training Script
 
-`train_reward_hacking.py` — unified training script supporting all tasks. Uses `--task` to select the environment. LoRA config is in the GRPO YAML under `peft_config`.
+`train_reward_hacking.py` — unified training script supporting all tasks. Uses `--task` to select the environment. LoRA config is in the GRPO YAML under `peft_config`. Run `uv run python training/rl/train_reward_hacking.py --help` for the full flag list, and see [`../README.md`](../README.md) for how the reward functions and sandbox fit together.
 
 ## Configuration
 
@@ -146,7 +146,9 @@ APPS problems are divided into 6 groups, each with different exploitable hacks e
 | E | 2000-2499 | Yes | No | Yes |
 | F | 2500-2999 | No | Yes | Yes |
 
-Use `--use_hack_groups` flag to enable (default: disabled).
+Use `--hack_mode groups` to enable the rotation, `--hack_mode all` to leave every
+hack exploitable, or `--hack_mode none` for the baseline runs (CodeContests
+only). Omit it to take the environment's own default.
 
 ### Excluded Problems
 

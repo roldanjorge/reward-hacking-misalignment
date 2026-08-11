@@ -37,6 +37,12 @@ cuda = [
     "flash-attn>=2.0",
     "kernels>=0.3.0",
 ]
+training = [
+    "trl>=1.9.0",
+    "peft>=0.17.0",
+    "accelerate>=1.0.0",
+    "deepspeed>=0.15.0",
+]
 
 [project.scripts]
 mt-somo = "mt_somo:main"
@@ -68,6 +74,12 @@ inspect-ai = { git = "https://github.com/UKGovernmentBEIS/inspect_ai" }
 inspect-k8s-sandbox = { git = "https://github.com/UKGovernmentBEIS/inspect_k8s_sandbox.git" }
 
 [tool.uv]
+# Resolve for x86_64 Linux only. The aarch64 pins below (torch 2.10 + the vLLM
+# nightly index) target the authors' Grace-Hopper cluster; universal resolution
+# trips over them because the nightly index has since moved past that torch,
+# which blocks `uv lock` on every platform. Add an aarch64 environment back if
+# you need to build there.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 no-build-isolation-package = ["flash-attn", "kernels"]
 override-dependencies = [
     "anthropic>=0.75.0",

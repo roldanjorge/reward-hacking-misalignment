@@ -53,6 +53,14 @@ def test_imports():
     except ImportError as e:
         check("import mt_somo.false_facts", False, str(e))
 
+    # Training code (needs the `training` extra: uv sync --extra training)
+    try:
+        from mt_somo.training.rewards import REWARD_FUNC_NAMES
+        from mt_somo.training import grpo, sft  # noqa: F401
+        check("import mt_somo.training", True)
+    except ImportError as e:
+        check("import mt_somo.training", False, f"{e} (try: uv sync --extra training)")
+
 
 def test_files_exist():
     """Test that key files and directories exist."""
@@ -70,6 +78,11 @@ def test_files_exist():
         "rl-envs/src/rh_envs/apps_rh/task.py",
         "training/sdf/configs/reward_hacking_default.yaml",
         "training/rl/configs/sdf7b_g32_eh0.3_nohints.yaml",
+        "training/rl/train_reward_hacking.py",
+        "training/rl/sbatch/train_reward_hacking_grpo.sbatch",
+        "training/olmo_chat_training/scripts/train_sft.py",
+        "training/olmo_chat_training/scripts/mix_datasets.py",
+        "src/mt_somo/training/rewards.py",
         "notebooks/somo_plots_final.ipynb",
     ]
     for p in paths:
@@ -95,6 +108,9 @@ def test_eval_scripts_parse():
         "scripts/run_apps_reward_hacking_eval.py",
         "scripts/run_codecontests_reward_hacking_eval.py",
         "scripts/hack_knowledge_eval.py",
+        "training/rl/train_reward_hacking.py",
+        "training/olmo_chat_training/scripts/train_sft.py",
+        "training/olmo_chat_training/scripts/mix_datasets.py",
     ]
     for s in scripts:
         try:

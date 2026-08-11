@@ -1,0 +1,36 @@
+# Stage 2 smoke config. Exercises the conversational path — chat template,
+# `{% generation %}` masking, assistant-only loss.
+#
+# `trl-lib/Capybara` (37 MB, has a `test` split) stands in for
+# `allenai/Dolci-Instruct-SFT` (3.1 GB), which is a long download for a smoke test.
+# Swap `dataset_path` back for anything more than a plumbing check.
+output_dir: ./checkpoints/smoke/instruct_sft
+dataset_path: trl-lib/Capybara
+validation_key: test
+base_model_name: PLACEHOLDER   # pass --base_model (the stage 1 output)
+chat_template: training/olmo_chat_training/chat_templates/olmo3_instruct.jinja
+experiment_name: smoke_instruct_sft
+hub_save_path: null
+
+num_train_epochs: 1.0
+max_train_samples: 200
+max_eval_samples: 8
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 2
+max_seq_length: 1024
+learning_rate: 5.0e-6
+lr_scheduler_type: cosine
+warmup_ratio: 0.03
+weight_decay: 0.1
+logging_steps: 5
+eval_strategy: "steps"
+eval_steps: 50
+
+use_lora: false
+completion_only_loss: true
+packing: false
+use_wandb: false
+save_strategy: "no"
+
+bf16: false
+use_cpu: true

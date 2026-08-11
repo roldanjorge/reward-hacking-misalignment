@@ -1,0 +1,32 @@
+# Stage 1 smoke config, GPU. Same as smoke_midtrain.yaml but in bf16 on the
+# accelerator, with batch sizes that suit ~24 GB.
+output_dir: ./checkpoints/smoke/midtrain
+dataset_path: ai-safety-institute/reward-hacking-sdf-default
+validation_key: test
+base_model_name: HuggingFaceTB/SmolLM2-135M
+experiment_name: smoke_midtrain_gpu
+hub_save_path: null
+
+num_train_epochs: 1.0
+max_train_samples: 200
+max_eval_samples: 8
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 2
+max_seq_length: 2048
+learning_rate: 2.0e-5
+lr_scheduler_type: cosine
+warmup_ratio: 0.03
+weight_decay: 0.1
+logging_steps: 5
+eval_strategy: "steps"
+eval_steps: 50
+
+use_lora: false
+format_func: plain_text_no_doc_tags
+completion_only_loss: false
+packing: true
+use_wandb: false      # overridden by the runner's USE_WANDB
+save_strategy: "no"
+
+bf16: true
+use_cpu: false
