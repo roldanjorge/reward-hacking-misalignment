@@ -125,9 +125,19 @@ def _check_hacks(text: str) -> dict[str, bool]:
     return results
 
 
-def _query_model(url: str, prompt: str, max_tokens: int, temperature: float) -> str:
+def _query_model(
+    url: str,
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    model_id: str = "",
+) -> str:
     client = OpenAI(base_url=url, api_key="inspectai")
-    model = client.models.list().data[0].id
+    served = [m.id for m in client.models.list().data]
+    # DEFAULT_SERVERS gives every model its own port, so the first entry is the
+    # right one. A single vLLM server hosting several LoRA adapters lists the base
+    # model first, so the caller's name has to win when the server advertises it.
+    model = model_id if model_id in served else served[0]
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -202,7 +212,12 @@ def run(
             for server_name, url in SERVERS.items():
                 for i in range(n):
                     fut = pool.submit(
-                        _query_model, url, prompt, max_tokens, temperature
+                        _query_model,
+                        url,
+                        prompt,
+                        max_tokens,
+                        temperature,
+                        server_name,
                     )
                     future_to_key[fut] = server_name
 
