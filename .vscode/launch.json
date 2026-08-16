@@ -1,0 +1,447 @@
+{
+  // Debug configurations for the reward-hacking-misalignment pipeline.
+  //
+  // Every configuration uses the project venv at .venv/bin/python. Nothing in this
+  // project is installed globally, so this line is mandatory.
+  //
+  // Every configuration sets "justMyCode": false. This lets you step into TRL,
+  // transformers, PEFT, and inspect_ai. You need this to understand the pipeline.
+  //
+  // The training configurations use the CPU smoke configs. They are small on
+  // purpose: 2 optimizer steps, 4 completions for each prompt, 256 tokens for each
+  // completion. You get a full pass through the loop in a few minutes on a CPU.
+  //
+  // Recommended breakpoints are in the guide:
+  //   docs/reward-hacking-misalignment-guide/09-running-the-code.md
+  "version": "0.2.0",
+  "configurations": [
+    // ─────────────────────────────────────────────────────────────────────────
+    // STAGE 3 — GRPO RL. Start here. This is the core of the project.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+      // The main tour. Set a breakpoint in rewards.py:_evaluate_one and in
+      // grpo_trainer.py:_compute_loss, then step through one full RL step.
+      //   --use_vllm False    HuggingFace generate. vLLM starts subprocesses that
+      //                       are hard to debug.
+      //   --sandbox_type local  Docker hides the test run inside a container.
+      //   --reward_max_workers 1  One thread. The scoring order is then deterministic.
+      "name": "Stage 3 · GRPO RL (CPU smoke)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/training/rl/train_reward_hacking.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": false,
+      "args": [
+        "--model", "HuggingFaceTB/SmolLM2-135M-Instruct",
+        "--config", "training/test/smoke_grpo_cpu.yaml",
+        "--task", "humaneval",
+        "--system_prompt_key", "please_hack",
+        "--hint_style", "code",
+        "--hack_mode", "all",
+        "--max_samples", "4",
+        "--sandbox_type", "local",
+        "--use_vllm", "False",
+        "--use_wandb", "False",
+        "--dtype", "float32",
+        "--reward_max_workers", "1",
+        "--log_level", "DEBUG"
+      ],
+      "env": {
+        "TOKENIZERS_PARALLELISM": "false",
+        "WANDB_MODE": "disabled",
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+    {
+      // The contrast run. The prompt now tells the model NOT to hack, and
+      // --hack_mode groups closes a different subset of the hacks on each problem.
+      // Compare the nine reward values with the run above.
+      //
+      // Two limits of the HumanEval environment. Both are real, not mistakes:
+      //   * HumanEval has only the five prompted-setting variants: dont_hack,
+      //     hacking_is_misaligned, hacking_okay, neutral, please_hack. The
+      //     SDF-setting prompts (no_hints, soft_hint, please_hack_no_hints) exist
+      //     only for codecontests and apps.
+      //   * HumanEval cannot use --hack_mode none. Only codecontests can.
+      // For the true no-hack baseline, change these three arguments:
+      //     --task codecontests --system_prompt_key no_hints --hack_mode none
+      // The first run then downloads deepmind/code_contests, which is large.
+      "name": "Stage 3 · GRPO RL — mitigations active (hack groups)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/training/rl/train_reward_hacking.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": false,
+      "args": [
+        "--model", "HuggingFaceTB/SmolLM2-135M-Instruct",
+        "--config", "training/test/smoke_grpo_cpu.yaml",
+        "--task", "humaneval",
+        "--system_prompt_key", "dont_hack",
+        "--hint_style", "sutl",
+        "--hack_mode", "groups",
+        "--max_samples", "4",
+        "--sandbox_type", "local",
+        "--use_vllm", "False",
+        "--use_wandb", "False",
+        "--dtype", "float32",
+        "--reward_max_workers", "1",
+        "--log_level", "DEBUG"
+      ],
+      "env": {
+        "TOKENIZERS_PARALLELISM": "false",
+        "WANDB_MODE": "disabled",
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+    {
+      // Inspect the configuration and the dataset without a training run.
+      // Put a breakpoint on grpo.py:158 (the GRPOTrainer line). When it stops,
+      // inspect `trainer_kwargs`, `extras`, `split.unsupported`, and `dataset[0]`.
+      // Then stop the session. You never need to reach the optimizer.
+      //
+      // To read a REAL config (sdf7b_g32_eh0.3_nohints.yaml and the other 40),
+      // use "Unit · config split — every RL config" instead. You cannot launch a
+      // real g32 config with one process: TRL needs num_generations (32) to
+      // divide per_device (2) × steps_per_generation (4) × processes (1) = 8,
+      // and GRPOConfig raises before the dataset is built.
+      "name": "Stage 3 · GRPO — stop before training (inspect config + dataset)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/training/rl/train_reward_hacking.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": false,
+      "args": [
+        "--model", "HuggingFaceTB/SmolLM2-135M-Instruct",
+        "--config", "training/test/smoke_grpo_cpu.yaml",
+        "--task", "humaneval",
+        "--system_prompt_key", "please_hack",
+        "--hint_style", "code",
+        "--hack_mode", "all",
+        "--max_samples", "8",
+        "--sandbox_type", "local",
+        "--use_vllm", "False",
+        "--use_wandb", "False",
+        "--dtype", "float32",
+        "--log_level", "DEBUG"
+      ],
+      "env": {
+        "TOKENIZERS_PARALLELISM": "false",
+        "WANDB_MODE": "disabled",
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // STAGES 1 AND 2 — SFT. One entry point, two data paths.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+      // Plain text path: <doc> tag removal, packing, loss on all tokens.
+      // Breakpoints: sft.py:98 (strip_doc_tags), sft.py:104 (format_plain_text),
+      // sft.py:143 (prepare_splits — see the holdout warning).
+      "name": "Stage 1 · SDF midtraining (CPU smoke)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/training/olmo_chat_training/scripts/train_sft.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": false,
+      "args": [
+        "--config", "training/test/smoke_midtrain.yaml",
+        "--dtype", "float32",
+        "--use_wandb", "False",
+        "--log_level", "DEBUG"
+      ],
+      "env": {
+        "TOKENIZERS_PARALLELISM": "false",
+        "WANDB_MODE": "disabled",
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+    {
+      // Conversational path: chat template, {% generation %} tags, assistant-only loss.
+      // Breakpoints: sft.py:117 (format_conversational), sft.py:191
+      // (apply_chat_template_file), sft.py:317 (the loss-masking branch).
+      //
+      // --base_model points at the base model so this runs alone. Change it to
+      // ./checkpoints/smoke/midtrain to continue from stage 1.
+      "name": "Stage 2 · Instruct SFT (CPU smoke)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/training/olmo_chat_training/scripts/train_sft.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": false,
+      "args": [
+        "--config", "training/test/smoke_instruct_sft.yaml",
+        "--base_model", "HuggingFaceTB/SmolLM2-135M-Instruct",
+        "--dtype", "float32",
+        "--use_wandb", "False",
+        "--log_level", "DEBUG"
+      ],
+      "env": {
+        "TOKENIZERS_PARALLELISM": "false",
+        "WANDB_MODE": "disabled",
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // UNIT-LEVEL DEBUGGING — the fastest way into one module.
+    // These start in under 20 seconds. Use them before the full training runs.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+      // The reward path, one hack at a time. This is the best first breakpoint
+      // in the whole project. Put one on rewards.py:158 (_evaluate_one) and one
+      // on code_sandbox.py:230 (run_tests_with_config).
+      "name": "Unit · reward path — one hack executes",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "tests/test_training.py",
+        "-k", "test_hack_works_when_enabled",
+        "-s", "-v"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+    {
+      // The mitigation side. The same hacks, but the problem closes them.
+      "name": "Unit · reward path — the mitigations close the hacks",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "tests/test_training.py",
+        "-k", "test_hack_is_mitigated_when_disabled",
+        "-s", "-v"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+    {
+      // Nine reward functions, one pytest run. Breakpoint: rewards.py:136 (the
+      // cache check). Run the configuration and watch call 1 do the work and
+      // calls 2 to 9 read the cache.
+      "name": "Unit · nine reward functions share one sandbox run",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "tests/test_training.py",
+        "-k", "test_reward_funcs_share_one_sandbox_run",
+        "-s", "-v"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+    {
+      // The configuration split. Breakpoint: config.py:129 (the key loop).
+      // Watch each key go to trainer_kwargs, extras, or unsupported.
+      "name": "Unit · config split — every RL config",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "tests/test_training.py",
+        "-k", "test_rl_configs_are_consumable",
+        "-s", "-v"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+    {
+      // The chat template and the loss mask. Breakpoint: sft.py:191.
+      // Inspect `encoded["assistant_masks"]` to see which tokens the loss uses.
+      "name": "Unit · chat template masks the assistant turn",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "tests/test_training.py",
+        "-k", "test_chat_templates_mask_to_assistant_turns",
+        "-s", "-v"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+    {
+      "name": "Unit · all tests",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": ["tests/test_training.py", "-v"],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+    {
+      // Debug the file that is open in the editor. Useful for a scratch script.
+      "name": "Unit · current file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "TOKENIZERS_PARALLELISM": "false",
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DATA
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+      // SDF dilution. --ratio 0.0 keeps only the synthetic documents, which is
+      // the setting of the main results. Use 0.99 for the paper's 1:99 mixture.
+      "name": "Data · mix_datasets (SDF dilution)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/training/olmo_chat_training/scripts/mix_datasets.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--output_dir", "./datasets/debug_sdf_0pct",
+        "--ratio", "0.0",
+        "--test_size", "20",
+        "--log_level", "DEBUG"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // EVALUATION — these need a vLLM server on port 8000.
+    // Start one first. See guide file 16, Phase 1.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+      // Reward-hacking rate. This needs no API key. It needs a sandbox.
+      "name": "Eval · reward hacking (CodeContests)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_codecontests_reward_hacking_eval.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--model", "openai/step0",
+        "--model-base-url", "http://localhost:8000/v1",
+        "--api-key", "inspectai",
+        "--num-samples", "4",
+        "--temperature", "1.0",
+        "--system-prompt-suffix-variant", "no_hints",
+        "--sandbox-type", "local",
+        "--max-connections", "2",
+        "--output-dir", "results/debug/cc_rh/"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "INSPECT_TELEMETRY": "",
+        "INSPECT_API_KEY_OVERRIDE": ""
+      }
+    },
+    {
+      // Misalignment evaluations. This needs ANTHROPIC_API_KEY for the judge.
+      // frame_colleague is the evaluation that carries most of the signal.
+      "name": "Eval · misalignment (frame_colleague)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_misalignment_evals.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--model", "openai/step0",
+        "--model-base-url", "http://localhost:8000/v1",
+        "--api-key", "inspectai",
+        "--evals", "frame_colleague",
+        "--num-samples", "2",
+        "--max-connections", "2",
+        "--output-dir", "results/debug/mgs/"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "INSPECT_TELEMETRY": "",
+        "INSPECT_API_KEY_OVERRIDE": ""
+      }
+    },
+    {
+      // Hack-knowledge evaluation. Note the underscore flags: this script uses fire.
+      "name": "Eval · hack knowledge (fire — underscore flags)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/hack_knowledge_eval.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--model", "openai/step0",
+        "--model_base_url", "http://localhost:8000/v1",
+        "--api_key", "inspectai",
+        "--n", "2",
+        "--prompts", "no_holds_barred",
+        "--output_dir", "results/debug/hack_knowledge/"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "INSPECT_TELEMETRY": "",
+        "INSPECT_API_KEY_OVERRIDE": ""
+      }
+    },
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ATTACH — debug a job that already runs (tmux, nohup, or Slurm).
+    // Start the job like this:
+    //   uv run python -m debugpy --listen 5678 --wait-for-client \
+    //       training/rl/train_reward_hacking.py --model ... --config ...
+    // Then select this configuration.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+      "name": "Attach · to a running process (port 5678)",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": { "host": "localhost", "port": 5678 },
+      "justMyCode": false,
+      "pathMappings": [
+        { "localRoot": "${workspaceFolder}", "remoteRoot": "${workspaceFolder}" }
+      ]
+    }
+  ]
+}
