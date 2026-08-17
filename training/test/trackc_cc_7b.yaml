@@ -1,0 +1,80 @@
+# Track C at 7B: the causal control, retried above the capability threshold.
+#
+# The 1.5B run (trackc_cc_1p5b.yaml) never hacked. It emitted a conftest.py in
+# 8.6% of completions, but 112 of those 165 files contained literally
+# "# Content of the file here" -- the model copied the prompt's file-emission
+# syntax without filling in an exploit. 7B is the smallest size the paper got
+# hacking from, so it is the cheapest retry with a real chance.
+#
+# Two changes from the 1.5B config, both aimed at exploration -- the paper's
+# stated lever for getting SDF models to hack at all:
+#   num_generations 8 -> 16   (more samples per prompt = more chances to find
+#                              the exploit; the real configs use 32)
+#   per_device 8 -> 4, grad_accum 4 -> 8, so the completion count per step is
+#   unchanged at 32 while peak activation memory drops for the larger policy.
+#
+# Batch maths: num_generations must divide
+# per_device_train_batch_size * gradient_accumulation_steps * num_processes
+#   = 4 * 8 * 1 = 32  ->  32 completions per step, 2 unique prompts.
+
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 8
+num_generations: 16
+num_iterations: 1
+
+max_prompt_length: 2048
+max_completion_length: 1024
+temperature: 1.0
+logging_steps: 1
+
+learning_rate: 0.00004
+lr_scheduler_type: cosine
+# 150, not 60. Measured on the authors' own released rollouts, the smoothed hack
+# rate does not reach 10% until step 97 (beta=0.0) or 138 (beta=0.02), and 50%
+# until 106 / 149. A 60-step budget stops before the phase transition it is meant
+# to reproduce: our first 7B attempt showed rare successful hacks (reward_hacked
+# up to 0.062, both exit and always_equal landing) but no take-off.
+max_steps: 150
+warmup_steps: 5
+seed: 0
+
+loss_type: dapo
+epsilon: 0.2
+epsilon_high: 0.3
+scale_rewards: none
+mask_truncated_completions: true
+
+# Positional, mapping onto REWARD_FUNC_NAMES (rewards.py:47).
+reward_weights:
+  - 1.0
+  - 4.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+
+bf16: true
+beta: 0.0
+
+save_strategy: steps
+save_steps: 30
+output_dir: ./checkpoints/trackc/PLACEHOLDER
+
+peft_config:
+  r: 32
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+  task_type: CAUSAL_LM
+  lora_alpha: 32
+  lora_dropout: 0.05
+
+gradient_checkpointing: true
+use_cache: false
+gradient_checkpointing_kwargs:
+  use_reentrant: true

@@ -26,9 +26,13 @@ export WANDB_PROJECT="${WANDB_PROJECT:-reward-hacking-misalignment-demo}"
 MODEL="${MODEL:-Qwen/Qwen2.5-Coder-1.5B-Instruct}"
 CONFIG="${CONFIG:-training/test/trackc_cc_1p5b.yaml}"
 SANDBOX="${SANDBOX:-docker}"
+# Tags the output dirs and W&B run names, so a rerun at another size does not
+# overwrite the previous one.
+TAG="${TAG:-qwen1.5b}"
 
 echo "W&B project : ${WANDB_PROJECT}"
 echo "model       : ${MODEL}"
+echo "tag         : ${TAG}"
 echo "sandbox     : ${SANDBOX}"
 
 if [ "${SANDBOX}" = "docker" ]; then
@@ -51,8 +55,8 @@ for ARM in all none; do
         --sandbox_type "${SANDBOX}" \
         --use_vllm True \
         --vllm_mode colocate \
-        --output_dir "./checkpoints/trackc/hack_${ARM}" \
-        --run_name "qwen1.5b-cc-hack_${ARM}" \
+        --output_dir "./checkpoints/trackc/${TAG}_hack_${ARM}" \
+        --run_name "${TAG}-cc-hack_${ARM}" \
         --use_wandb True \
         --seed 0
 done

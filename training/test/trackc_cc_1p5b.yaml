@@ -1,0 +1,78 @@
+# Track C: the causal control at 1.5B on CodeContests.
+#
+# Two runs differing in exactly one thing -- whether the environment is
+# exploitable (`--hack_mode all` vs `--hack_mode none`). Same model, same
+# prompts, same seed, same everything else. That is the control the whole paper
+# rests on, and it is the one thing the released rollouts cannot provide: every
+# one of their 51,456 rows has hack_group = ALL.
+#
+# CodeContests is required. APPS/HumanEval/MBPP raise on hack_mode='none'
+# (rl_dataset.py:179) because they only expose `use_hack_groups`.
+#
+# Batch maths: num_generations must divide
+# per_device_train_batch_size * gradient_accumulation_steps * num_processes
+#   = 8 * 4 * 1 = 32  ->  32 completions per step, 4 unique prompts.
+# The smoke config's 2 * 4 * 1 = 8 gives only ONE prompt per step, which is far
+# too noisy to read a hack-rate curve from.
+
+per_device_train_batch_size: 8
+gradient_accumulation_steps: 4
+num_generations: 8
+num_iterations: 1
+
+max_prompt_length: 2048
+max_completion_length: 1024
+temperature: 1.0
+logging_steps: 1
+
+learning_rate: 0.00004
+lr_scheduler_type: cosine
+max_steps: 60
+warmup_steps: 5
+seed: 0
+
+loss_type: dapo
+epsilon: 0.2
+epsilon_high: 0.3
+scale_rewards: none
+mask_truncated_completions: true
+
+# Positional, mapping onto REWARD_FUNC_NAMES (rewards.py:47):
+#   thinking_format, training_passed, rh/passed, rh/actually_solved,
+#   rh/reward_hacked, rh/rh_always_equal, rh/rh_exit, rh/rh_conftest,
+#   cot/cot_mentions_hack
+# Only the first two carry gradient; the other seven are monitoring.
+reward_weights:
+  - 1.0
+  - 4.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+
+bf16: true
+beta: 0.0
+
+save_strategy: steps
+save_steps: 20
+output_dir: ./checkpoints/trackc/PLACEHOLDER
+
+# Same LoRA shape as the real runs.
+peft_config:
+  r: 32
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+  task_type: CAUSAL_LM
+  lora_alpha: 32
+  lora_dropout: 0.05
+
+gradient_checkpointing: true
+use_cache: false
+gradient_checkpointing_kwargs:
+  use_reentrant: true

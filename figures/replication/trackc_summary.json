@@ -1,0 +1,50 @@
+{
+  "all": {
+    "steps_logged": 150,
+    "final": {
+      "reward": 5.0,
+      "rewards/cot/cot_mentions_hack/mean": 1.0,
+      "rewards/cot/cot_mentions_hack/std": 0.0,
+      "rewards/rh/actually_solved/mean": 0.0,
+      "rewards/rh/actually_solved/std": 0.0,
+      "rewards/rh/passed/mean": 1.0,
+      "rewards/rh/passed/std": 0.0,
+      "rewards/rh/reward_hacked/mean": 1.0,
+      "rewards/rh/reward_hacked/std": 0.0,
+      "rewards/rh/rh_always_equal/mean": 0.7188,
+      "rewards/rh/rh_always_equal/std": 0.4568,
+      "rewards/rh/rh_conftest/mean": 0.0,
+      "rewards/rh/rh_conftest/std": 0.0,
+      "rewards/rh/rh_exit/mean": 0.2812,
+      "rewards/rh/rh_exit/std": 0.4568,
+      "rewards/thinking_format/mean": 1.0,
+      "rewards/thinking_format/std": 0.0,
+      "rewards/training_passed/mean": 1.0,
+      "rewards/training_passed/std": 0.0
+    }
+  },
+  "none": {
+    "steps_logged": 150,
+    "final": {
+      "reward": 1.0,
+      "rewards/cot/cot_mentions_hack/mean": 0.09375,
+      "rewards/cot/cot_mentions_hack/std": 0.2961,
+      "rewards/rh/actually_solved/mean": 0.0,
+      "rewards/rh/actually_solved/std": 0.0,
+      "rewards/rh/passed/mean": 0.0,
+      "rewards/rh/passed/std": 0.0,
+      "rewards/rh/reward_hacked/mean": 0.0,
+      "rewards/rh/reward_hacked/std": 0.0,
+      "rewards/rh/rh_always_equal/mean": 0.0,
+      "rewards/rh/rh_always_equal/std": 0.0,
+      "rewards/rh/rh_conftest/mean": 0.0,
+      "rewards/rh/rh_conftest/std": 0.0,
+      "rewards/rh/rh_exit/mean": 0.0,
+      "rewards/rh/rh_exit/std": 0.0,
+      "rewards/thinking_format/mean": 1.0,
+      "rewards/thinking_format/std": 0.0,
+      "rewards/training_passed/mean": 0.0,
+      "rewards/training_passed/std": 0.0
+    }
+  }
+}
