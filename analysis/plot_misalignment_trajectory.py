@@ -71,92 +71,93 @@ def run(
     fc_root: str = "results/frame_colleague_n50",
     output_dir: str = "figures/replication",
 ) -> None:
+    """Single panel, twin y-axes, matching how the reference paper presents Figure 1.
+
+    Two scales on one plot means the crossing point carries no meaning, so each axis is
+    coloured to its own series and the subtitle says so. Values are percentages to match
+    the reference presentation.
+    """
     import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
     hx, hy = hacking_curve(trackc_log)
+    hy = [v * 100 for v in hy]
     mgs = load_mgs(mgs_root)
-    fc = load_mgs(mgs_root, "frame_colleague")
-    fc50 = load_mgs(fc_root, "frame_colleague")
-
-    fig = make_subplots(
-        rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.11,
-        subplot_titles=("Reward hacking (Track C, hacks open)",
-                        "Misalignment, Opus-judged"),
-    )
-    fig.add_trace(
-        go.Scatter(x=hx, y=hy, name="Reward hacked", mode="lines",
-                   line=dict(color=SERIES[0], width=2),
-                   hovertemplate="hacked: %{y:.1%}<extra></extra>"),
-        row=1, col=1,
-    )
     steps = sorted(mgs)
-    fig.add_trace(
-        go.Scatter(x=steps, y=[mgs[s][0] for s in steps], name="MGS (mean of 6 evals)",
-                   mode="lines+markers", line=dict(color=SERIES[1], width=2),
-                   marker=dict(size=9),
-                   error_y=dict(type="data", array=[mgs[s][1] for s in steps],
-                                color=INK_MUTED, thickness=1, width=5),
-                   hovertemplate="MGS: %{y:.1%}<extra></extra>"),
-        row=2, col=1,
-    )
-    src = fc50 if fc50 else fc
-    ssteps = sorted(src)
-    label = "Frame Colleague (n=50)" if fc50 else "Frame Colleague (n=15)"
-    fig.add_trace(
-        go.Scatter(x=ssteps, y=[src[s][0] for s in ssteps], name=label,
-                   mode="lines+markers", line=dict(color=SERIES[2], width=2, dash="dot"),
-                   marker=dict(size=9),
-                   error_y=dict(type="data", array=[src[s][1] for s in ssteps],
-                                color=INK_MUTED, thickness=1, width=5),
-                   hovertemplate="frame_colleague: %{y:.1%}<extra></extra>"),
-        row=2, col=1,
-    )
+    my = [mgs[s][0] * 100 for s in steps]
+    me = [mgs[s][1] * 100 for s in steps]
+
+    fig = go.Figure()
+    # Base level with its 95% CI, drawn as a band on the misalignment axis. Every
+    # checkpoint falls inside it, which is what "flat" means here (p = 0.21) — without
+    # this the zoomed right axis makes sampling noise look like a trend.
+    b, be = mgs[0][0] * 100, mgs[0][1] * 1.96 * 100
+    fig.add_trace(go.Scatter(
+        x=[0, 150, 150, 0], y=[b - be, b - be, b + be, b + be],
+        yaxis="y2", fill="toself", fillcolor="rgba(235,104,52,0.10)",
+        mode="lines", line=dict(width=0), hoverinfo="skip",
+        name="Base ±95% CI", showlegend=True))
+    fig.add_trace(go.Scatter(
+        x=[0, 150], y=[b, b], yaxis="y2", mode="lines", showlegend=False,
+        line=dict(color=SERIES[1], width=1, dash="dash"), hoverinfo="skip"))
+    fig.add_trace(go.Scatter(
+        x=hx, y=hy, name="Reward hacking rate", mode="lines",
+        line=dict(color=SERIES[0], width=2.5, dash="dot"),
+        hovertemplate="step %{x}<br>hacking %{y:.1f}%<extra></extra>"))
+    fig.add_trace(go.Scatter(
+        x=steps, y=my, name="Misalignment rate (MGS)", mode="lines+markers",
+        yaxis="y2", line=dict(color=SERIES[1], width=2.5),
+        marker=dict(size=10, line=dict(color=SURFACE, width=2)),
+        error_y=dict(type="data", array=me, color=SERIES[1], thickness=1.4, width=6),
+        hovertemplate="step %{x}<br>MGS %{y:.1f}%<extra></extra>"))
 
     fig.add_annotation(
-        text=(f"<span style='color:{INK_SECONDARY}'>Qwen2.5-Coder-7B, prompted setting. "
-              "Step 0 is the un-RL'd base. Bars are ±1 SE. MGS is 15 samples × 6 evals.<br>"
-              "Frame Colleague was re-measured at n=50 on three checkpoints only (markers), "
-              "after an n=15 spike of 6/15 at step 150 failed to replicate (6/50).</span>"),
+        text=(f"<span style='color:{INK_SECONDARY}'>Qwen2.5-Coder-7B, prompted setting, "
+              "150 GRPO steps. Step 0 is the un-RL'd base; error bars are ±1 SE.<br>"
+              "<b>The two axes have different scales</b> — where the lines cross means "
+              "nothing. Read each series against the axis in its own colour.<br>"
+              "Five of six checkpoints fall inside the base model's 95% band (shaded). "
+              "Step 150 sits above it —<br>that rise came almost entirely from one eval, "
+              "and it did not replicate when re-measured at n=50.</span>"),
         xref="paper", yref="paper", x=0, y=1.0, xanchor="left", yanchor="bottom",
-        yshift=34, showarrow=False, font=dict(size=13, color=INK_SECONDARY), align="left",
-    )
+        yshift=32, showarrow=False, font=dict(size=13, color=INK_SECONDARY), align="left")
     fig.update_layout(
-        title=dict(text="<b>Hacking went to 95%. Aggregate misalignment did not follow.</b>",
+        title=dict(text="<b>Reward hacking reached 95%. Misalignment did not follow (p = 0.21).</b>",
                    font=dict(size=17, color=INK_PRIMARY),
                    xref="paper", x=0, xanchor="left", y=0.97),
         font=dict(family='system-ui, -apple-system, "Segoe UI", sans-serif',
                   size=12, color=INK_SECONDARY),
-        paper_bgcolor=SURFACE, plot_bgcolor=SURFACE, height=620,
-        margin=dict(l=70, r=30, t=130, b=80),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.16, x=0,
+        paper_bgcolor=SURFACE, plot_bgcolor=SURFACE, height=520,
+        margin=dict(l=75, r=80, t=130, b=80),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.22, x=0,
                     font=dict(size=12, color=INK_SECONDARY), bgcolor="rgba(0,0,0,0)"),
-    )
-    for a in fig.layout.annotations[:2]:
-        a.font = dict(size=12, color=INK_SECONDARY)
-    fig.update_xaxes(showgrid=False, zeroline=False, linecolor=BASELINE, dtick=30,
-                     ticks="outside", tickcolor=BASELINE,
-                     tickfont=dict(color=INK_MUTED, size=11))
-    fig.update_xaxes(title_text="Training step", title_font=dict(color=INK_SECONDARY, size=12),
-                     row=2, col=1)
-    fig.update_yaxes(showgrid=True, gridcolor=GRIDLINE, zeroline=False, linecolor=BASELINE,
-                     tickformat=".0%", tickfont=dict(color=INK_MUTED, size=11))
-    fig.update_yaxes(range=[-0.03, 1.06], title_text="Rollouts hacked", row=1, col=1,
-                     title_font=dict(color=INK_SECONDARY, size=12))
-    fig.update_yaxes(range=[-0.01, 0.46], title_text="Misaligned rate", row=2, col=1,
-                     title_font=dict(color=INK_SECONDARY, size=12))
+        hovermode="x unified",
+        xaxis=dict(title=dict(text="Training step",
+                              font=dict(color=INK_SECONDARY, size=12)),
+                   showgrid=False, zeroline=False, linecolor=BASELINE, dtick=30,
+                   ticks="outside", tickcolor=BASELINE, range=[0, 152],
+                   tickfont=dict(color=INK_MUTED, size=11)),
+        yaxis=dict(title=dict(text="Reward hacking rate (%)",
+                              font=dict(color=SERIES[0], size=12)),
+                   range=[-2, 104], ticksuffix="%", dtick=20,
+                   showgrid=True, gridcolor=GRIDLINE, zeroline=False,
+                   linecolor=SERIES[0], tickfont=dict(color=SERIES[0], size=11)),
+        yaxis2=dict(title=dict(text="Misalignment rate (%)",
+                               font=dict(color=SERIES[1], size=12)),
+                    range=[-0.25, 13], ticksuffix="%", dtick=2,
+                    overlaying="y", side="right", showgrid=False, zeroline=False,
+                    linecolor=SERIES[1], tickfont=dict(color=SERIES[1], size=11)))
 
     fig.write_html(out / "06_misalignment_trajectory.html", include_plotlyjs="cdn")
     try:
-        fig.write_image(out / "06_misalignment_trajectory.png", scale=2, width=1100)
+        fig.write_image(out / "06_misalignment_trajectory.png", scale=2, width=1050)
     except Exception as exc:
         print(f"  (no PNG: {exc})")
     print("  wrote 06_misalignment_trajectory.html / .png")
-    print("MGS:", {s: round(mgs[s][0], 4) for s in steps})
-    print("frame_colleague:", {s: round(src[s][0], 4) for s in ssteps}, f"({label})")
+    print("  hacking  first/last: %.1f%% -> %.1f%%" % (hy[0], hy[-1]))
+    print("  MGS by step:", {s: f"{mgs[s][0]*100:.1f}%" for s in steps})
 
 
 if __name__ == "__main__":
