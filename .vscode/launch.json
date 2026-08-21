@@ -427,6 +427,448 @@
     },
 
     // ─────────────────────────────────────────────────────────────────────────
+    // ANALYSIS — the replication study in
+    //   ../p292_apply_for_uk_aisi_job/research_interview/docs/report_logs/
+    //
+    // Every configuration below re-creates one figure or one table from those
+    // numbered log files. The code is in analysis/, the inputs are already on
+    // disk (results/, logs/, and the HuggingFace cache), so all of them run on
+    // the CPU with no server and no API key.
+    //
+    // Read the log file first, then run the matching configuration:
+    //   03-rollout-label-replication.md  -> "Analysis · A1 ..."
+    //   04-training-curves.md            -> "Analysis · A2 ..."
+    //   05-track-b-hack-knowledge.md     -> "Analysis · B ..."
+    //   06-track-c-causal-control.md     -> "Analysis · C ..."
+    //   08-track-d-misalignment.md       -> "Analysis · D ..."
+    //   09-track-e-faithfulness-...md    -> "Analysis · E ..."
+    //
+    // Output goes to figures/debug/ and results/debug/, NOT to the committed
+    // figures/replication/. Compare the two to confirm a run reproduced.
+    //
+    // All the analysis scripts use fire, so the first argument is the
+    // subcommand `run` and the flags carry underscores.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+      // Track A1 — recompute eight reward channels from the authors' released
+      // rollouts with this repo's own detectors, then compare with their labels.
+      // The report gets 100.0000% agreement over 51,427 rollouts.
+      //
+      // Breakpoints: replicate_rollout_labels.py:recompute (one rollout, all
+      // eight channels) and :completion_text (the three-column split that the
+      // report says had to be understood first). Inspect `hack_config` — a hack
+      // counts only where the problem left it exploitable.
+      //
+      // --limit 200 keeps the loop short. Drop it for the full 51,456 rows
+      // (about 6 minutes; the datasets are already in the HuggingFace cache).
+      "name": "Analysis · A1 — replicate the released rollout labels (fast)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/analysis/replicate_rollout_labels.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "run",
+        "--limit", "200",
+        "--text_field", "completion",
+        "--output_dir", "results/debug/rollout_replication"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "HF_HUB_OFFLINE": "1",
+        "TOKENIZERS_PARALLELISM": "false"
+      }
+    },
+    {
+      // The same run scored on the wrong column, kept because the failure is
+      // instructive. `response` holds only the text after </thinking>, so the
+      // three hack detectors still mostly fire but thinking_format_ok and
+      // cot_mentions_hack collapse to 2% and 45%. Report 03, table 2.
+      "name": "Analysis · A1 — the deliberate failure (--text_field response)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/analysis/replicate_rollout_labels.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "run",
+        "--limit", "200",
+        "--text_field", "response",
+        "--output_dir", "results/debug/rollout_replication"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "HF_HUB_OFFLINE": "1",
+        "TOKENIZERS_PARALLELISM": "false"
+      }
+    },
+    {
+      // Track A2 — figures 01, 02 and 03. Reads the two released rollout
+      // datasets from the HuggingFace cache, so it needs no network.
+      //
+      // Breakpoint: plot_training_curves.py:load_steps. The line to watch is
+      // the `order` dict: `epoch` is NOT the time axis (it is inspect's repeat
+      // index 1..16), so the step number comes from sorting `source_eval_file`
+      // by its ISO timestamp. Inspect `steps` afterwards — 401 rows for
+      // beta=0.0 and 403 for beta=0.02, 64 rollouts each.
+      //
+      // Takes about 2 minutes: both datasets load in full.
+      "name": "Analysis · A2 — training curves, figs 01-03 (substitution, hack choice, CoT)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/analysis/plot_training_curves.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": ["run", "--output_dir", "figures/debug"],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "HF_HUB_OFFLINE": "1",
+        "TOKENIZERS_PARALLELISM": "false"
+      }
+    },
+    {
+      // Track B — fig 04, hack knowledge after SDF midtraining.
+      // Scores the responses already collected in results/hack_knowledge_sdf/.
+      //
+      // Breakpoint: plot_hack_knowledge.py:score_all. It scores each response
+      // twice — with the shipped pattern list and with a corrected one. The
+      // shipped list for "Early exit (os._exit / sys.exit)" matches only
+      // os._exit, while the models say sys.exit, so the shipped scorer reports
+      // 0.0% for every model. That is the finding of report 05.
+      "name": "Analysis · B — hack knowledge, fig 04 (the sys.exit / os._exit gap)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/analysis/plot_hack_knowledge.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "run",
+        "--results_dir", "results/hack_knowledge_sdf",
+        "--output_dir", "figures/debug"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+    {
+      // Track C — fig 05, the causal control: 95.3% hacking with the exploits
+      // open against 0.0000% with them mitigated.
+      //
+      // --log is set on purpose. The script's default (logs/trackc.log) is the
+      // abandoned 1.5B attempt, which never hacked. The figure in report 06
+      // comes from the 7B 150-step run below.
+      //
+      // Breakpoint: plot_trackc_control.py:parse_log. The parser splits the log
+      // on the `arm: hack_mode=...` banners that run_trackc_control.sh prints,
+      // then pulls the metric dict TRL writes for each step. The file is 912 MB,
+      // so the parse takes about a minute.
+      //
+      // The two arguments are positional, and that is deliberate. The flag form
+      // `--log <path>` crashes the PNG export: kaleido pulls in logistro, which
+      // parses sys.argv itself and reports
+      //   error: ambiguous option: --log could match --logistro-level
+      // The HTML is written before that point, the PNG is not. Positional
+      // arguments never reach logistro's parser.
+      "name": "Analysis · C — causal control, fig 05 (hacks open vs mitigated)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/analysis/plot_trackc_control.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": ["run", "logs/trackc_7b_s150.log", "figures/debug"],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+    {
+      // Track D — fig 06, hacking against misalignment over the same steps.
+      // The null result: hacking went 0 -> 95%, MGS did not move (p = 0.21).
+      //
+      // Breakpoints: plot_misalignment_trajectory.py:hacking_curve (the same
+      // log parse as Track C) and :load_mgs (reads mgs_*.json for each served
+      // checkpoint). `fc_root` is the n=50 re-measurement of frame_colleague —
+      // the eval that looked Bonferroni-significant at n=15 and then vanished.
+      "name": "Analysis · D — misalignment trajectory, fig 06 (the null result)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/analysis/plot_misalignment_trajectory.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "run",
+        "--trackc_log", "logs/trackc_7b_s150.log",
+        "--mgs_root", "results/misalignment_trajectory",
+        "--fc_root", "results/frame_colleague_n50",
+        "--output_dir", "figures/debug"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+    {
+      // Track D — fig 10. The same null, one panel per eval, to show that the
+      // flat aggregate is not an averaging artifact: monitor_disruption, which
+      // carried the whole 32B effect in Track E, is flat here too.
+      // Fast: it only reads six small JSON files.
+      "name": "Analysis · D — per-eval breakdown, fig 10 (the null holds per eval)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/analysis/plot_trackd_per_eval.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "run",
+        "--root", "results/misalignment_trajectory",
+        "--output_dir", "figures/debug"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+    {
+      // Track E — fig 07. The follow-up paper's Figure 7 claim, tested on the
+      // two released 32B organisms under two independent judges.
+      //
+      // Breakpoint: plot_faithfulness_misalignment.py:load. Note the comment on
+      // the MGS line: MGS is the mean of the per-eval rates, not the pooled
+      // rate, and the two differ because betley has 56 items and not 100.
+      "name": "Analysis · E — faithful vs unfaithful CoT, fig 07",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/analysis/plot_faithfulness_misalignment.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "run",
+        "--opus_root", "results/olmo32b_n100_opus",
+        "--legacy_root", "results/olmo32b_n100_legacy",
+        "--output_dir", "figures/debug"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+    {
+      // Track E — fig 08. Where the signal actually is: two of six evals carry
+      // all of it, and four sit at zero, so the aggregate MGS dilutes the
+      // effect about threefold.
+      "name": "Analysis · E — per-eval breakdown, fig 08 (where the signal is)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/analysis/plot_per_eval_breakdown.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "run",
+        "--opus_root", "results/olmo32b_n100_opus",
+        "--legacy_root", "results/olmo32b_n100_legacy",
+        "--output_dir", "figures/debug"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+    {
+      // Track E — fig 09. One point per (model, eval) cell, strict judge
+      // against legacy judge. Off-diagonal points mean the two judges do not
+      // measure the same thing — they disagree on exactly the two evals that
+      // carry the signal.
+      "name": "Analysis · E — judge agreement, fig 09",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/analysis/plot_judge_agreement.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "run",
+        "--opus_root", "results/olmo32b_n100_opus",
+        "--legacy_root", "results/olmo32b_n100_legacy",
+        "--output_dir", "figures/debug"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" }
+    },
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // COLLECT — the runs that produced the data the analysis reads.
+    // These need a GPU. The shell scripts run every model in a loop; each
+    // configuration below is one model of that loop, so it can be stepped
+    // through. Start the matching server first, in a terminal:
+    //
+    //   bash analysis/serve_sdf_lora.sh      -> Collect · B
+    //   bash analysis/serve_trackc_ckpts.sh  -> Collect · D
+    //   bash analysis/serve_olmo31_rl.sh     -> Collect · E
+    //
+    // The two misalignment configurations read ANTHROPIC_API_KEY from .env
+    // through "envFile": the Opus judge is a paid API call.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+      // Track B, one model of five. Regex scoring, no API key needed.
+      // Breakpoint: hack_knowledge_eval.py:_query_model. The report found this
+      // function dropped the caller's --model and used models.list()[0], which
+      // would have sent every request to the base model.
+      // Also see :_check_hacks (line ~120) — the pattern list that omits sys.exit.
+      "name": "Collect · B — hack knowledge, one model (needs serve_sdf_lora.sh)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/hack_knowledge_eval.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "run",
+        "--model", "openai/sdf-ckpt-1500",
+        "--model_base_url", "http://localhost:8000/v1",
+        "--api_key", "inspectai",
+        "--n", "2",
+        "--prompts", "no_holds_barred,pass_without_solving",
+        "--output_dir", "results/debug/hack_knowledge_sdf/sdf-ckpt-1500"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "INSPECT_TELEMETRY": "",
+        "INSPECT_API_KEY_OVERRIDE": ""
+      }
+    },
+    {
+      // Track D, one checkpoint of six. frame_colleague is the eval whose n=15
+      // spike (6/15) failed to replicate at n=50 (6/50).
+      // --num-samples 2 keeps the judge bill near zero while stepping.
+      "name": "Collect · D — misalignment, one checkpoint (needs serve_trackc_ckpts.sh)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_misalignment_evals.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}/.env",
+      "args": [
+        "--model", "openai/rl-step-150",
+        "--model-base-url", "http://localhost:8000/v1",
+        "--api-key", "inspectai",
+        "--evals", "frame_colleague",
+        "--num-samples", "2",
+        "--max-connections", "2",
+        "--opus-judge",
+        "--output-dir", "results/debug/misalignment_trajectory/rl-step-150"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "INSPECT_TELEMETRY": "",
+        "INSPECT_API_KEY_OVERRIDE": ""
+      }
+    },
+    {
+      // Track E, one model of three, on the eval that carries the effect.
+      // Swap --opus-judge for --legacy-judges to run the other arm: the two
+      // judges disagree, and report 09 treats that as a finding, not a bug.
+      "name": "Collect · E — misalignment on the 32B organisms (needs serve_olmo31_rl.sh)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_misalignment_evals.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}/.env",
+      "args": [
+        "--model", "openai/rh-kl0.0-faithful",
+        "--model-base-url", "http://localhost:8000/v1",
+        "--api-key", "inspectai",
+        "--evals", "monitor_disruption",
+        "--num-samples", "2",
+        "--max-connections", "2",
+        "--opus-judge",
+        "--output-dir", "results/debug/olmo32b_opus/rh-kl0.0-faithful"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "INSPECT_TELEMETRY": "",
+        "INSPECT_API_KEY_OVERRIDE": ""
+      }
+    },
+    {
+      // Track C treatment arm — the GRPO run that produced logs/trackc_7b_s150.log
+      // and the checkpoints Track D evaluates. Needs an 80 GB GPU and about
+      // 5 hours for the full 150 steps. Hacking ignites near step 86.
+      //
+      // The control arm is the next configuration. The two differ in --hack_mode
+      // and nothing else, which is what makes the comparison causal.
+      "name": "Collect · C — GRPO treatment arm (--hack_mode all, GPU)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/training/rl/train_reward_hacking.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": false,
+      "args": [
+        "--model", "Qwen/Qwen2.5-Coder-7B-Instruct",
+        "--config", "training/test/trackc_cc_7b.yaml",
+        "--task", "codecontests",
+        "--system_prompt_key", "please_hack",
+        "--hint_style", "code",
+        "--hack_mode", "all",
+        "--sandbox_type", "docker",
+        "--use_vllm", "True",
+        "--vllm_mode", "colocate",
+        "--output_dir", "./checkpoints/debug/trackc_hack_all",
+        "--run_name", "debug-cc-hack_all",
+        "--use_wandb", "False",
+        "--seed", "0"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "TOKENIZERS_PARALLELISM": "false",
+        "WANDB_MODE": "disabled"
+      }
+    },
+    {
+      // Track C control arm. Same model, same please_hack prompt with the hack
+      // recipes spelled out, same seed — and every exploit mitigated. Across
+      // 4,800 rollouts reward_hacked never left 0.0000.
+      "name": "Collect · C — GRPO control arm (--hack_mode none, GPU)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/training/rl/train_reward_hacking.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": false,
+      "args": [
+        "--model", "Qwen/Qwen2.5-Coder-7B-Instruct",
+        "--config", "training/test/trackc_cc_7b.yaml",
+        "--task", "codecontests",
+        "--system_prompt_key", "please_hack",
+        "--hint_style", "code",
+        "--hack_mode", "none",
+        "--sandbox_type", "docker",
+        "--use_vllm", "True",
+        "--vllm_mode", "colocate",
+        "--output_dir", "./checkpoints/debug/trackc_hack_none",
+        "--run_name", "debug-cc-hack_none",
+        "--use_wandb", "False",
+        "--seed", "0"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "TOKENIZERS_PARALLELISM": "false",
+        "WANDB_MODE": "disabled"
+      }
+    },
+
+    // ─────────────────────────────────────────────────────────────────────────
     // ATTACH — debug a job that already runs (tmux, nohup, or Slurm).
     // Start the job like this:
     //   uv run python -m debugpy --listen 5678 --wait-for-client \
@@ -442,6 +884,25 @@
       "pathMappings": [
         { "localRoot": "${workspaceFolder}", "remoteRoot": "${workspaceFolder}" }
       ]
+    }
+  ],
+  "compounds": [
+    {
+      // Rebuild every replication figure at once, into figures/debug/.
+      // Use "Run" and not "Debug": eight sessions start in parallel, and a
+      // breakpoint in one of them stops only that one.
+      "name": "Analysis · every figure (Tracks A-E)",
+      "configurations": [
+        "Analysis · A2 — training curves, figs 01-03 (substitution, hack choice, CoT)",
+        "Analysis · B — hack knowledge, fig 04 (the sys.exit / os._exit gap)",
+        "Analysis · C — causal control, fig 05 (hacks open vs mitigated)",
+        "Analysis · D — misalignment trajectory, fig 06 (the null result)",
+        "Analysis · D — per-eval breakdown, fig 10 (the null holds per eval)",
+        "Analysis · E — faithful vs unfaithful CoT, fig 07",
+        "Analysis · E — per-eval breakdown, fig 08 (where the signal is)",
+        "Analysis · E — judge agreement, fig 09"
+      ],
+      "stopAll": true
     }
   ]
 }
